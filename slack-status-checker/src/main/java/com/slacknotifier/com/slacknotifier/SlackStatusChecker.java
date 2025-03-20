@@ -131,14 +131,10 @@ public class SlackStatusChecker {
             lastStatus = currentStatus;
         }
     }
-
-    // Add these fields at the top with other fields
-    private static final int PERIODS_PER_DAY = 24; // 24 one-hour periods
+    private static final int PERIODS_PER_DAY = 24;
     private int[] onlineCountPerPeriod = new int[PERIODS_PER_DAY];
     private int[] huddleCountPerPeriod = new int[PERIODS_PER_DAY];
     private int[] totalChecksPerPeriod = new int[PERIODS_PER_DAY];
-    
-    // Add this method
     private void updateEfficiencyMetrics() {
         int currentHour = java.time.LocalDateTime.now().getHour();
         totalChecksPerPeriod[currentHour]++;
@@ -156,14 +152,21 @@ public class SlackStatusChecker {
         analyzeEfficiencyPatterns();
     }
     
+    // Add these fields at the top with other fields
+    private static final int MINIMUM_CHECKS_REQUIRED = 3;
+    private long metricsStartTime = System.currentTimeMillis();
+    
     private void analyzeEfficiencyPatterns() {
         double maxEfficiency = 0.0;
         int mostProductiveHour = 0;
-        StringBuilder report = new StringBuilder("Efficiency Patterns:\n\n");
+        StringBuilder report = new StringBuilder();
+        report.append("Efficiency Report\n\n");
         
+        boolean hasData = false;
         for (int hour = 0; hour < PERIODS_PER_DAY; hour++) {
-            if (totalChecksPerPeriod[hour] == 0) continue;
+            if (totalChecksPerPeriod[hour] < MINIMUM_CHECKS_REQUIRED) continue;
             
+            hasData = true;
             double onlineRatio = (double) onlineCountPerPeriod[hour] / totalChecksPerPeriod[hour];
             double huddleRatio = (double) huddleCountPerPeriod[hour] / totalChecksPerPeriod[hour];
             double efficiency = (onlineRatio * 0.7) + (huddleRatio * 0.3);
@@ -173,14 +176,24 @@ public class SlackStatusChecker {
                 mostProductiveHour = hour;
             }
             
-            if (efficiency > 0.3) { // Only report significant activity periods
-                report.append(String.format("%02d:00 - %02d:00: %.2f%% efficiency\n", 
-                    hour, (hour + 1) % 24, efficiency * 100));
-            }
+            String timeBlock = String.format("%02d:00 - %02d:00", hour, (hour + 1) % 24);
+            String efficiencyBar = createEfficiencyBar(efficiency);
+            report.append(String.format("%s | %s %.1f%% (%d checks)\n", 
+                timeBlock, efficiencyBar, efficiency * 100, totalChecksPerPeriod[hour]));
         }
         
-        report.append(String.format("\nMost Productive Hour: %02d:00 - %02d:00 (%.2f%% efficiency)", 
-            mostProductiveHour, (mostProductiveHour + 1) % 24, maxEfficiency * 100));
+        if (!hasData) {
+            report.append("Collecting data... Please wait for more samples.\n");
+            report.append(String.format("Current hour checks: %d (need %d more)\n", 
+                totalChecksPerPeriod[java.time.LocalDateTime.now().getHour()],
+                MINIMUM_CHECKS_REQUIRED - totalChecksPerPeriod[java.time.LocalDateTime.now().getHour()]));
+        } else {
+            report.append(String.format("\nMost Productive: %02d:00 - %02d:00 (%.1f%%)", 
+                mostProductiveHour, (mostProductiveHour + 1) % 24, maxEfficiency * 100));
+        }
+        
+        // Debug print
+        System.out.println("Efficiency Report Content:\n" + report.toString());
         
         notifyEfficiencyPatterns(report.toString());
     }
@@ -189,17 +202,23 @@ public class SlackStatusChecker {
         try {
             String[] cmd = {
                 "terminal-notifier",
-                "-title", "⏰ " + userName + "'s Efficiency Patterns",
+                "-title", "Efficiency Report for " + userName,
                 "-message", patterns,
                 "-sound", "default"
             };
-            Runtime.getRuntime().exec(cmd);
+            Process process = Runtime.getRuntime().exec(cmd);
+            // Add error handling
+            java.io.BufferedReader errorReader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getErrorStream()));
+            String line;
+            while ((line = errorReader.readLine()) != null) {
+                System.err.println("Notification Error: " + line);
+            }
         } catch (Exception e) {
             System.err.println("Failed to send efficiency patterns notification: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-
-    // Modify the checkProductivity method to include efficiency metrics
     @Scheduled(every = "10s")
     public void checkProductivity() {
         String currentStatus = getUserStatus();
@@ -214,7 +233,7 @@ public class SlackStatusChecker {
             totalHuddleTime += timeElapsed;
         }
 
-        updateEfficiencyMetrics(); // Add this line before the end of the method
+        updateEfficiencyMetrics();
         
         double productivityScore = calculateProductivity();
         notifyProductivity(productivityScore);
@@ -253,4 +272,19 @@ public class SlackStatusChecker {
             System.err.println("Failed to send productivity notification: " + e.getMessage());
         }
     }
+    // Add this method after analyzeEfficiencyPatterns
+        private String createEfficiencyBar(double efficiency) {
+            int barLength = 10;
+            int filledBars = (int) (efficiency * barLength);
+            StringBuilder bar = new StringBuilder();
+            
+            for (int i = 0; i < barLength; i++) {
+                if (i < filledBars) {
+                    bar.append("■");  // Using a different block character that's more compatible
+                } else {
+                    bar.append("□");  // Empty block character
+                }
+            }
+            return bar.toString();
+        }
 }
