@@ -1,10 +1,15 @@
 package com.slacknotifier;
 
+// Add these imports at the top
+import java.util.List;
+import java.util.ArrayList;
+import jakarta.json.Json;
+import jakarta.json.JsonObject;
+import jakarta.json.JsonArrayBuilder;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.json.JSONObject;
-import java.util.concurrent.TimeUnit;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -240,12 +245,39 @@ public class SlackStatusChecker {
         lastStatusCheckTime = currentTime;
     }
 
-    private double calculateProductivity() {
+    // Change these methods to public
+    public double calculateProductivity() {
         double workingSeconds = WORKING_HOURS * 3600; 
         double onlinePercentage = (totalOnlineTime / workingSeconds) * 100;
         double huddlePercentage = (totalHuddleTime / workingSeconds) * 100;
         
         return (onlinePercentage * 0.7) + (huddlePercentage * 0.3);
+    }
+
+    public long getTotalOnlineTime() {
+        return totalOnlineTime;
+    }
+
+    public long getTotalHuddleTime() {
+        return totalHuddleTime;
+    }
+
+    public List<JsonObject> getHourlyMetrics() {
+        List<JsonObject> metrics = new ArrayList<>();
+        for (int hour = 0; hour < PERIODS_PER_DAY; hour++) {
+            if (totalChecksPerPeriod[hour] >= MINIMUM_CHECKS_REQUIRED) {
+                double onlineRatio = (double) onlineCountPerPeriod[hour] / totalChecksPerPeriod[hour];
+                double huddleRatio = (double) huddleCountPerPeriod[hour] / totalChecksPerPeriod[hour];
+                double efficiency = (onlineRatio * 0.7) + (huddleRatio * 0.3);
+                
+                metrics.add(Json.createObjectBuilder()
+                    .add("hour", hour)
+                    .add("efficiency", efficiency)
+                    .add("timeBlock", String.format("%02d:00 - %02d:00", hour, (hour + 1) % 24))
+                    .build());
+            }
+        }
+        return metrics;
     }
 
     private void notifyProductivity(double productivity) {

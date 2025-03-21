@@ -22,6 +22,9 @@ import java.io.StringReader;
 import com.slack.api.methods.response.users.UsersInfoResponse;
 import com.slack.api.model.User;
 
+// Add this import at the top
+import io.quarkus.scheduler.Scheduled;
+
 @ServerEndpoint("/status")  // Changed back to original endpoint
 @ApplicationScoped
 public class WebSocketEndpoint {
@@ -88,6 +91,36 @@ public class WebSocketEndpoint {
         }
     }
 
+    @Inject
+    SlackStatusChecker slackStatusChecker;
+
+    @Scheduled(every = "1m")
+    public void sendPeriodicUpdates() {
+        for (Session session : sessions) {
+            if (session.isOpen()) {
+                try {
+                    // Get productivity metrics
+                    double productivityScore = slackStatusChecker.calculateProductivity();
+                    long onlineTime = slackStatusChecker.getTotalOnlineTime();
+                    long huddleTime = slackStatusChecker.getTotalHuddleTime();
+
+                    // Create metrics update object
+                    JsonObject metricsUpdate = Json.createObjectBuilder()
+                        .add("type", "metricsUpdate")
+                        .add("onlineTime", onlineTime / 3600.0)
+                        .add("huddleTime", huddleTime / 3600.0)
+                        .add("productivityScore", productivityScore)
+                        .add("hourlyMetrics", Json.createArrayBuilder(slackStatusChecker.getHourlyMetrics()))
+                        .build();
+
+                    session.getAsyncRemote().sendText(metricsUpdate.toString());
+                } catch (Exception e) {
+                    System.err.println("Error sending periodic update: " + e.getMessage());
+                }
+            }
+        }
+    }
+
     private void sendUserInfoWithRetry(Session session, int retryCount) {
         try {
             if (!isUserVerified) {
@@ -97,15 +130,9 @@ public class WebSocketEndpoint {
 
             MethodsClient methods = slack.methods(slackToken);
             
-            // Get user info
-            var userResponse = methods.usersInfo(r -> r
-                .token(slackToken)
-                .user(userId));
-
-            // Get presence info
-            var presenceResponse = methods.usersGetPresence(r -> r
-                .token(slackToken)
-                .user(userId));
+            // Get user info and presence info
+            var userResponse = methods.usersInfo(r -> r.token(slackToken).user(userId));
+            var presenceResponse = methods.usersGetPresence(r -> r.token(slackToken).user(userId));
 
             if (!userResponse.isOk() || !presenceResponse.isOk()) {
                 if (retryCount < MAX_RETRY_ATTEMPTS - 1) {
@@ -119,18 +146,32 @@ public class WebSocketEndpoint {
 
             var member = userResponse.getUser();
             if (member != null) {
+                // Get productivity metrics
+                double productivityScore = slackStatusChecker.calculateProductivity();
+                long onlineTime = slackStatusChecker.getTotalOnlineTime();
+                long huddleTime = slackStatusChecker.getTotalHuddleTime();
+
+                // Create efficiency object
+                var efficiencyData = Json.createObjectBuilder()
+                    .add("onlineTime", onlineTime / 3600.0) // Convert to hours
+                    .add("huddleTime", huddleTime / 3600.0) // Convert to hours
+                    .add("productivityScore", productivityScore)
+                    .add("hourlyMetrics", Json.createArrayBuilder(slackStatusChecker.getHourlyMetrics()))
+                    .build();
+
                 JsonObject userInfo = Json.createObjectBuilder()
                     .add("type", "userInfo")
-                    .add("status", presenceResponse.getPresence()) // Use actual presence status
+                    .add("status", presenceResponse.getPresence())
                     .add("huddle", "in_a_huddle".equals(member.getProfile().getHuddleState()))
                     .add("userName", member.getName())
                     .add("realName", member.getRealName())
                     .add("statusText", member.getProfile().getStatusText() != null ? member.getProfile().getStatusText() : "")
                     .add("statusEmoji", member.getProfile().getStatusEmoji() != null ? member.getProfile().getStatusEmoji() : "")
                     .add("imageUrl", member.getProfile().getImage192())
+                    .add("efficiency", efficiencyData)
                     .build();
 
-                System.out.println("User presence: " + presenceResponse.getPresence());
+                System.out.println("Sending user info with efficiency data: " + userInfo);
                 session.getAsyncRemote().sendText(userInfo.toString());
             }
         } catch (Exception e) {
