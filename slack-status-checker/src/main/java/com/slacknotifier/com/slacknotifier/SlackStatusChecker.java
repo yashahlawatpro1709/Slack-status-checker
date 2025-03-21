@@ -121,7 +121,7 @@ public class SlackStatusChecker {
         }
     }
 
-    @Scheduled(every = "1s")
+    @Scheduled(every = "1m")
     public void checkStatus() {
         String currentStatus = getUserStatus();
         System.out.println("Checking status... Current: " + currentStatus + ", Last: " + lastStatus);
@@ -219,7 +219,7 @@ public class SlackStatusChecker {
             e.printStackTrace();
         }
     }
-    @Scheduled(every = "10s")
+    @Scheduled(every = "1m")
     public void checkProductivity() {
         String currentStatus = getUserStatus();
         boolean inHuddle = checkHuddleStatus();
